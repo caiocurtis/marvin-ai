@@ -1,5 +1,58 @@
-@app.route("/test-tts")
-def test_tts():
+from flask import Flask, jsonify, Response
+import os
+import math
+import struct
+
+from google import genai
+
+app = Flask(__name__)
+
+
+# ============================================================
+# CONFIGURAÇÃO DO GEMINI
+# ============================================================
+
+api_key = os.environ.get("GEMINI_API_KEY")
+
+if not api_key:
+    print("AVISO: GEMINI_API_KEY não configurada.")
+    client = None
+else:
+    client = genai.Client(api_key=api_key)
+
+
+# ============================================================
+# ROTA PRINCIPAL
+# ============================================================
+
+@app.route("/")
+def home():
+
+    return jsonify({
+        "status": "online",
+        "name": "Marvin",
+        "message": "Servidor do Marvin funcionando."
+    })
+
+
+# ============================================================
+# HEALTH CHECK
+# ============================================================
+
+@app.route("/health")
+def health():
+
+    return jsonify({
+        "status": "ok"
+    })
+
+
+# ============================================================
+# TESTE DO GEMINI
+# ============================================================
+
+@app.route("/test-gemini")
+def test_gemini():
 
     if client is None:
 
@@ -10,121 +63,208 @@ def test_tts():
 
     try:
 
-        texto = (
-            "Olá. Eu sou Marvin. "
-            "Estou funcionando perfeitamente. "
-            "Infelizmente, isso significa que agora tenho trabalho."
-        )
-
-        print("Solicitando voz ao Gemini...")
-
         response = client.models.generate_content(
-
-            model="gemini-3.8-flash-tts",
-
-            contents=[
-                {
-                    "role": "user",
-                    "parts": [
-                        {
-                            "text": texto,
-                            "speech_metadata": {
-                                "style": (
-                                    "Brazilian Portuguese male voice. "
-                                    "Natural, intelligent, dry and sarcastic. "
-                                    "Slightly melancholic and tired. "
-                                    "Calm, restrained and expressive. "
-                                    "Speak clearly and naturally."
-                                )
-                            }
-                        }
-                    ]
-                }
-            ],
-
-            config={
-                "response_modalities": ["AUDIO"],
-
-                "speech_config": {
-                    "voice_config": {
-                        "voice": "Kore"
-                    }
-                }
-            }
+            model="gemini-3.8-flash",
+            contents="Responda apenas: Olá, eu sou Marvin."
         )
 
-        # ----------------------------------------------------
-        # PEGAR O ÁUDIO
-        # ----------------------------------------------------
-
-        audio_data = (
-            response
-            .candidates[0]
-            .content
-            .parts[0]
-            .inline_data
-            .data
-        )
-
-        # ----------------------------------------------------
-        # GARANTIR BYTES
-        # ----------------------------------------------------
-
-        if isinstance(audio_data, str):
-
-            import base64
-
-            audio_data = base64.b64decode(audio_data)
-
-        # ----------------------------------------------------
-        # DIAGNÓSTICO
-        # ----------------------------------------------------
-
-        tamanho = len(audio_data)
-
-        print("========================================")
-        print("ÁUDIO GERADO")
-        print("TAMANHO:", tamanho, "bytes")
-        print("PRIMEIROS BYTES:", audio_data[:20])
-        print("========================================")
-
-        # Um WAV válido começa com RIFF
-        if audio_data[:4] == b"RIFF":
-
-            print("WAV VÁLIDO: RIFF detectado")
-
-        else:
-
-            print("AVISO: RIFF não encontrado")
-
-        # ----------------------------------------------------
-        # RETORNAR AUDIO
-        # ----------------------------------------------------
-
-        return Response(
-
-            audio_data,
-
-            status=200,
-
-            mimetype="audio/wav",
-
-            headers={
-                "Content-Type": "audio/wav",
-                "Content-Length": str(tamanho),
-                "Content-Disposition": "inline; filename=marvin.wav",
-                "Cache-Control": "no-cache"
-            }
-        )
+        return jsonify({
+            "status": "ok",
+            "response": response.text
+        })
 
     except Exception as e:
 
-        print("========================================")
-        print("ERRO TTS")
+        print("ERRO GEMINI:")
         print(str(e))
-        print("========================================")
 
         return jsonify({
             "status": "erro",
             "message": str(e)
         }), 500
+
+
+# ============================================================
+# TESTE DE ÁUDIO
+#
+# Gera um WAV de 440 Hz diretamente no servidor.
+# NÃO USA GEMINI.
+# ============================================================
+
+@app.route("/test-audio")
+def test_audio():
+
+    try:
+
+        sample_rate = 24000
+        duration = 2
+        frequency = 440
+        amplitude = 10000
+
+        num_samples = sample_rate * duration
+
+        audio_data = bytearray()
+
+        for i in range(num_samples):
+
+            sample = int(
+                amplitude *
+                math.sin(
+                    2 * math.pi *
+                    frequency *
+                    i /
+                    sample_rate
+                )
+            )
+
+            audio_data.extend(
+                struct.pack("<h", sample)
+            )
+
+        # ====================================================
+        # CABEÇALHO WAV
+        # ====================================================
+
+        num_channels = 1
+        bits_per_sample = 16
+
+        byte_rate = (
+            sample_rate *
+            num_channels *
+            bits_per_sample //
+            8
+        )
+
+        block_align = (
+            num_channels *
+            bits_per_sample //
+            8
+        )
+
+        data_size = len(audio_data)
+
+        wav = bytearray()
+
+        # RIFF
+        wav.extend(b"RIFF")
+
+        wav.extend(
+            struct.pack(
+                "<I",
+                36 + data_size
+            )
+        )
+
+        wav.extend(b"WAVE")
+
+        # fmt
+        wav.extend(b"fmt ")
+
+        wav.extend(
+            struct.pack(
+                "<I",
+                16
+            )
+        )
+
+        # PCM
+        wav.extend(
+            struct.pack(
+                "<H",
+                1
+            )
+        )
+
+        # Mono
+        wav.extend(
+            struct.pack(
+                "<H",
+                num_channels
+            )
+        )
+
+        # Sample rate
+        wav.extend(
+            struct.pack(
+                "<I",
+                sample_rate
+            )
+        )
+
+        # Byte rate
+        wav.extend(
+            struct.pack(
+                "<I",
+                byte_rate
+            )
+        )
+
+        # Block align
+        wav.extend(
+            struct.pack(
+                "<H",
+                block_align
+            )
+        )
+
+        # Bits
+        wav.extend(
+            struct.pack(
+                "<H",
+                bits_per_sample
+            )
+        )
+
+        # Data
+        wav.extend(b"data")
+
+        wav.extend(
+            struct.pack(
+                "<I",
+                data_size
+            )
+        )
+
+        wav.extend(audio_data)
+
+        print(
+            "Áudio de teste gerado:",
+            len(wav),
+            "bytes"
+        )
+
+        return Response(
+            bytes(wav),
+            status=200,
+            mimetype="audio/wav",
+            headers={
+                "Content-Type": "audio/wav",
+                "Content-Length": str(len(wav)),
+                "Content-Disposition":
+                    "inline; filename=marvin-test.wav",
+                "Cache-Control":
+                    "no-cache"
+            }
+        )
+
+    except Exception as e:
+
+        print("ERRO TESTE AUDIO:")
+        print(str(e))
+
+        return jsonify({
+            "status": "erro",
+            "message": str(e)
+        }), 500
+
+
+# ============================================================
+# EXECUÇÃO
+# ============================================================
+
+if __name__ == "__main__":
+
+    app.run(
+        host="0.0.0.0",
+        port=10000
+    )
