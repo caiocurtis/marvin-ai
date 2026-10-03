@@ -1,270 +1,75 @@
-from flask import Flask, jsonify, Response
-import os
+from flask import Flask, Response
 import math
 import struct
-
-from google import genai
 
 app = Flask(__name__)
 
 
-# ============================================================
-# CONFIGURAÇÃO DO GEMINI
-# ============================================================
-
-api_key = os.environ.get("GEMINI_API_KEY")
-
-if not api_key:
-    print("AVISO: GEMINI_API_KEY não configurada.")
-    client = None
-else:
-    client = genai.Client(api_key=api_key)
-
-
-# ============================================================
-# ROTA PRINCIPAL
-# ============================================================
-
 @app.route("/")
 def home():
-
-    return jsonify({
+    return {
         "status": "online",
-        "name": "Marvin",
-        "message": "Servidor do Marvin funcionando."
-    })
+        "name": "Marvin"
+    }
 
-
-# ============================================================
-# HEALTH CHECK
-# ============================================================
 
 @app.route("/health")
 def health():
-
-    return jsonify({
+    return {
         "status": "ok"
-    })
+    }
 
 
-# ============================================================
-# TESTE DO GEMINI
-# ============================================================
+@app.route("/test-pcm")
+def test_pcm():
 
-@app.route("/test-gemini")
-def test_gemini():
+    # -----------------------------------------
+    # CONFIGURAÇÃO DO ÁUDIO
+    # -----------------------------------------
 
-    if client is None:
+    sample_rate = 24000
+    frequencia = 440
+    duracao = 2
 
-        return jsonify({
-            "status": "erro",
-            "message": "GEMINI_API_KEY não configurada no Render."
-        }), 500
+    total_amostras = sample_rate * duracao
 
-    try:
+    amplitude = 10000
 
-        response = client.models.generate_content(
-            model="gemini-3.8-flash",
-            contents="Responda apenas: Olá, eu sou Marvin."
-        )
+    audio = bytearray()
 
-        return jsonify({
-            "status": "ok",
-            "response": response.text
-        })
+    # -----------------------------------------
+    # GERAR TOM 440 Hz
+    # -----------------------------------------
 
-    except Exception as e:
+    for i in range(total_amostras):
 
-        print("ERRO GEMINI:")
-        print(str(e))
-
-        return jsonify({
-            "status": "erro",
-            "message": str(e)
-        }), 500
-
-
-# ============================================================
-# TESTE DE ÁUDIO
-#
-# Gera um WAV de 440 Hz diretamente no servidor.
-# NÃO USA GEMINI.
-# ============================================================
-
-@app.route("/test-audio")
-def test_audio():
-
-    try:
-
-        sample_rate = 24000
-        duration = 2
-        frequency = 440
-        amplitude = 10000
-
-        num_samples = sample_rate * duration
-
-        audio_data = bytearray()
-
-        for i in range(num_samples):
-
-            sample = int(
-                amplitude *
-                math.sin(
-                    2 * math.pi *
-                    frequency *
-                    i /
-                    sample_rate
-                )
-            )
-
-            audio_data.extend(
-                struct.pack("<h", sample)
-            )
-
-        # ====================================================
-        # CABEÇALHO WAV
-        # ====================================================
-
-        num_channels = 1
-        bits_per_sample = 16
-
-        byte_rate = (
-            sample_rate *
-            num_channels *
-            bits_per_sample //
-            8
-        )
-
-        block_align = (
-            num_channels *
-            bits_per_sample //
-            8
-        )
-
-        data_size = len(audio_data)
-
-        wav = bytearray()
-
-        # RIFF
-        wav.extend(b"RIFF")
-
-        wav.extend(
-            struct.pack(
-                "<I",
-                36 + data_size
-            )
-        )
-
-        wav.extend(b"WAVE")
-
-        # fmt
-        wav.extend(b"fmt ")
-
-        wav.extend(
-            struct.pack(
-                "<I",
-                16
-            )
-        )
-
-        # PCM
-        wav.extend(
-            struct.pack(
-                "<H",
-                1
-            )
-        )
-
-        # Mono
-        wav.extend(
-            struct.pack(
-                "<H",
-                num_channels
-            )
-        )
-
-        # Sample rate
-        wav.extend(
-            struct.pack(
-                "<I",
+        valor = int(
+            amplitude *
+            math.sin(
+                2 * math.pi *
+                frequencia *
+                i /
                 sample_rate
             )
         )
 
-        # Byte rate
-        wav.extend(
-            struct.pack(
-                "<I",
-                byte_rate
-            )
-        )
+        audio += struct.pack("<h", valor)
 
-        # Block align
-        wav.extend(
-            struct.pack(
-                "<H",
-                block_align
-            )
-        )
+    # -----------------------------------------
+    # RETORNAR PCM PURO
+    # -----------------------------------------
 
-        # Bits
-        wav.extend(
-            struct.pack(
-                "<H",
-                bits_per_sample
-            )
-        )
+    return Response(
+        bytes(audio),
+        mimetype="application/octet-stream",
+        headers={
+            "Content-Type": "application/octet-stream",
+            "X-Sample-Rate": str(sample_rate),
+            "X-Channels": "1",
+            "X-Bits": "16"
+        }
+    )
 
-        # Data
-        wav.extend(b"data")
-
-        wav.extend(
-            struct.pack(
-                "<I",
-                data_size
-            )
-        )
-
-        wav.extend(audio_data)
-
-        print(
-            "Áudio de teste gerado:",
-            len(wav),
-            "bytes"
-        )
-
-        return Response(
-            bytes(wav),
-            status=200,
-            mimetype="audio/wav",
-            headers={
-                "Content-Type": "audio/wav",
-                "Content-Length": str(len(wav)),
-                "Content-Disposition":
-                    "inline; filename=marvin-test.wav",
-                "Cache-Control":
-                    "no-cache"
-            }
-        )
-
-    except Exception as e:
-
-        print("ERRO TESTE AUDIO:")
-        print(str(e))
-
-        return jsonify({
-            "status": "erro",
-            "message": str(e)
-        }), 500
-
-
-# ============================================================
-# EXECUÇÃO
-# ============================================================
 
 if __name__ == "__main__":
-
-    app.run(
-        host="0.0.0.0",
-        port=10000
-    )
+    app.run()
