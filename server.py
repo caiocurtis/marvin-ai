@@ -1,13 +1,25 @@
-from flask import Flask, jsonify, request, Response
-from openai import OpenAI
+from flask import Flask, jsonify, request
 import os
+from google import genai
 
 app = Flask(__name__)
 
-client = OpenAI(
-    api_key=os.environ.get("OPENAI_API_KEY")
-)
+# ==============================
+# CONFIGURAÇÃO GEMINI
+# ==============================
 
+api_key = os.environ.get("GEMINI_API_KEY")
+
+if not api_key:
+    print("AVISO: GEMINI_API_KEY não configurada.")
+    client = None
+else:
+    client = genai.Client(api_key=api_key)
+
+
+# ==============================
+# PÁGINA PRINCIPAL
+# ==============================
 
 @app.route("/")
 def home():
@@ -18,6 +30,10 @@ def home():
     })
 
 
+# ==============================
+# TESTE DE SAÚDE
+# ==============================
+
 @app.route("/health")
 def health():
     return jsonify({
@@ -25,59 +41,48 @@ def health():
     })
 
 
-@app.route("/tts")
-def tts():
+# ==============================
+# TESTE GEMINI
+# ==============================
 
-    texto = request.args.get("text", "").strip()
+@app.route("/test-gemini")
+def test_gemini():
 
-    if not texto:
+    if client is None:
         return jsonify({
-            "error": "Informe o texto usando ?text="
-        }), 400
-
-    if len(texto) > 1000:
-        return jsonify({
-            "error": "Texto muito grande."
-        }), 400
+            "status": "erro",
+            "message": "GEMINI_API_KEY não configurada no Render."
+        }), 500
 
     try:
 
-        response = client.audio.speech.create(
-            model="gpt-4o-mini-tts",
-            voice="cedar",
-            input=texto,
-            instructions=(
-                "Speak in Brazilian Portuguese. "
-                "Use a male voice. "
-                "Speak slowly and calmly. "
-                "The voice should sound intelligent, dry, slightly tired "
-                "and mildly sarcastic, but always understandable and natural. "
-                "Avoid exaggerated acting."
-            ),
-            response_format="wav",
-            speed=0.92
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents="Responda apenas: Olá, eu sou Marvin."
         )
 
-        audio = response.read()
-
-        return Response(
-            audio,
-            mimetype="audio/wav",
-            headers={
-                "Content-Disposition": "inline; filename=marvin.wav"
-            }
-        )
+        return jsonify({
+            "status": "ok",
+            "response": response.text
+        })
 
     except Exception as e:
 
-        print("ERRO TTS:", e)
+        print("ERRO GEMINI:")
+        print(str(e))
 
         return jsonify({
-            "error": str(e)
+            "status": "erro",
+            "message": str(e)
         }), 500
 
 
+# ==============================
+# INICIALIZAÇÃO
+# ==============================
+
 if __name__ == "__main__":
+
     app.run(
         host="0.0.0.0",
         port=10000
