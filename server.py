@@ -57,9 +57,9 @@ def test_gemini():
     try:
 
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents="Responda apenas: Olá, eu sou Marvin."
-        )
+    model="gemini-3.8-flash",
+    contents="Responda apenas: Olá, eu sou Marvin."
+)
 
         return jsonify({
             "status": "ok",
