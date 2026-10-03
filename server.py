@@ -1,5 +1,6 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response
 import os
+import base64
 from google import genai
 
 app = Flask(__name__)
@@ -31,7 +32,7 @@ def home():
 
 
 # ============================================================
-# TESTE DO SERVIDOR
+# HEALTH CHECK
 # ============================================================
 
 @app.route("/health")
@@ -78,7 +79,91 @@ def test_gemini():
 
 
 # ============================================================
-# EXECUÇÃO LOCAL
+# TESTE DE VOZ DO MARVIN
+# ============================================================
+
+@app.route("/test-tts")
+def test_tts():
+
+    if client is None:
+        return jsonify({
+            "status": "erro",
+            "message": "GEMINI_API_KEY não configurada no Render."
+        }), 500
+
+    try:
+
+        texto = (
+            "Olá. Eu sou Marvin. "
+            "Estou funcionando perfeitamente. "
+            "Infelizmente, isso significa que agora tenho trabalho."
+        )
+
+        response = client.models.generate_content(
+            model="gemini-3.8-flash-tts",
+
+            contents=[{
+                "role": "user",
+                "parts": [{
+                    "text": texto,
+                    "speech_metadata": {
+                        "style": (
+                            "Portuguese Brazilian male voice, "
+                            "dry, sarcastic, intelligent, slightly melancholic, "
+                            "calm and understated. "
+                            "Speak naturally and clearly."
+                        )
+                    }
+                }]
+            }],
+
+            config={
+                "response_modalities": ["AUDIO"],
+                "speech_config": {
+                    "voice_config": {
+                        "voice": "Kore"
+                    }
+                }
+            }
+        )
+
+        # ====================================================
+        # O GEMINI RETORNA O ÁUDIO EM BASE64
+        # ====================================================
+
+        audio_data = response.candidates[0].content.parts[0].inline_data.data
+
+        # Algumas versões do SDK podem retornar bytes diretamente.
+        # Outras podem retornar Base64.
+        if isinstance(audio_data, str):
+            audio_bytes = base64.b64decode(audio_data)
+        else:
+            audio_bytes = audio_data
+
+        print("ÁUDIO TTS GERADO!")
+        print("Tamanho:", len(audio_bytes), "bytes")
+
+        return Response(
+            audio_bytes,
+            mimetype="audio/wav",
+            headers={
+                "Content-Disposition": "inline; filename=marvin.wav"
+            }
+        )
+
+    except Exception as e:
+
+        print("ERRO TTS:")
+        print(str(e))
+
+        return jsonify({
+            "status": "erro",
+            "message": str(e)
+        }), 500
+
+
+# ============================================================
+# EXECUÇÃO
 # ============================================================
 
 if __name__ == "__main__":
