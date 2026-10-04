@@ -1,3 +1,4 @@
+```python
 from flask import Flask, request, jsonify, Response
 from google import genai
 import os
@@ -29,6 +30,7 @@ MODELOS_MARVIN = [
     "gemini-3.6-flash"
 ]
 
+# Modelo de voz
 MODELO_TTS = "gemini-3.8-flash-lite-tts"
 
 
@@ -116,13 +118,19 @@ def perguntar_gemini(texto):
                 ):
 
                     if tentativa == 0:
-                        print("Aguardando 2 segundos antes de tentar novamente...")
+                        print(
+                            "Aguardando 2 segundos antes "
+                            "de tentar novamente..."
+                        )
                         time.sleep(2)
 
                 else:
                     break
 
-    raise RuntimeError(ultimo_erro or "Gemini nao retornou resposta")
+    raise RuntimeError(
+        ultimo_erro or
+        "Gemini nao retornou resposta"
+    )
 
 
 # ============================================================
@@ -132,7 +140,10 @@ def perguntar_gemini(texto):
 @app.route("/marvin", methods=["GET"])
 def marvin():
 
-    texto = request.args.get("texto", "").strip()
+    texto = request.args.get(
+        "texto",
+        ""
+    ).strip()
 
     if not texto:
 
@@ -185,7 +196,10 @@ def marvin():
 @app.route("/marvin-tts", methods=["GET"])
 def marvin_tts():
 
-    texto = request.args.get("texto", "").strip()
+    texto = request.args.get(
+        "texto",
+        ""
+    ).strip()
 
     if not texto:
 
@@ -227,13 +241,6 @@ def marvin_tts():
             config={
                 "response_modalities": ["AUDIO"],
 
-                "response_format": {
-                    "audio": {
-                        "mime_type": "AUDIO_L16",
-                        "sample_rate": 24000
-                    }
-                },
-
                 "speech_config": {
                     "voice_config": {
                         "voice": "Kore"
@@ -272,9 +279,10 @@ def marvin_tts():
         print("Audio recebido!")
         print("Bytes:", len(audio_data))
 
+        # O generate_content() retorna WAV completo
         return Response(
             audio_data,
-            mimetype="audio/L16"
+            mimetype="audio/wav"
         )
 
     except Exception as erro:
@@ -304,14 +312,18 @@ def test_pcm():
 
     audio = bytearray()
 
-    total_amostras = sample_rate * duracao
+    total_amostras = (
+        sample_rate *
+        duracao
+    )
 
     for i in range(total_amostras):
 
         valor = int(
             12000 *
             math.sin(
-                2 * math.pi *
+                2 *
+                math.pi *
                 frequencia *
                 i /
                 sample_rate
@@ -319,7 +331,10 @@ def test_pcm():
         )
 
         audio.extend(
-            struct.pack("<h", valor)
+            struct.pack(
+                "<h",
+                valor
+            )
         )
 
     return Response(
@@ -352,14 +367,18 @@ def marvin_pcm():
 
     audio = bytearray()
 
-    total_amostras = sample_rate * duracao
+    total_amostras = (
+        sample_rate *
+        duracao
+    )
 
     for i in range(total_amostras):
 
         valor = int(
             12000 *
             math.sin(
-                2 * math.pi *
+                2 *
+                math.pi *
                 frequencia *
                 i /
                 sample_rate
@@ -367,7 +386,10 @@ def marvin_pcm():
         )
 
         audio.extend(
-            struct.pack("<h", valor)
+            struct.pack(
+                "<h",
+                valor
+            )
         )
 
     resposta = Response(
@@ -375,7 +397,9 @@ def marvin_pcm():
         mimetype="audio/L16"
     )
 
-    resposta.headers["X-Marvin-Text"] = texto
+    resposta.headers[
+        "X-Marvin-Text"
+    ] = texto
 
     return resposta
 
@@ -391,7 +415,10 @@ def test_gemini():
 
         resposta = client.models.generate_content(
             model="gemini-3.8-flash",
-            contents="Responda apenas: Olá, eu sou Marvin."
+            contents=(
+                "Responda apenas: "
+                "Olá, eu sou Marvin."
+            )
         )
 
         return jsonify({
@@ -437,3 +464,4 @@ if __name__ == "__main__":
             )
         )
     )
+```
