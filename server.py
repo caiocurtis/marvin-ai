@@ -1,12 +1,23 @@
-from flask import Flask, Response, request
-import math
-import struct
+from flask import Flask, Response, request, jsonify
+from google import genai
+import os
+import base64
+import io
+import wave
 
 app = Flask(__name__)
 
+# =====================================================
+# GEMINI
+# =====================================================
+
+client = genai.Client(
+    api_key=os.environ.get("GEMINI_API_KEY")
+)
+
 
 # =====================================================
-# MARVIN
+# HOME
 # =====================================================
 
 @app.route("/")
@@ -31,101 +42,206 @@ def health():
 
 
 # =====================================================
-# TESTE PCM
+# TESTE GEMINI
 # =====================================================
 
-@app.route("/test-pcm")
-def test_pcm():
+@app.route("/test-gemini")
+def test_gemini():
 
-    sample_rate = 24000
-    frequencia = 440
-    duracao = 2
+    try:
 
-    total_amostras = sample_rate * duracao
-
-    amplitude = 10000
-
-    audio = bytearray()
-
-    for i in range(total_amostras):
-
-        valor = int(
-            amplitude *
-            math.sin(
-                2 * math.pi *
-                frequencia *
-                i /
-                sample_rate
-            )
+        response = client.models.generate_content(
+            model="gemini-3.8-flash",
+            contents="Responda apenas: Olá, eu sou Marvin."
         )
 
-        audio += struct.pack("<h", valor)
+        return {
+            "status": "ok",
+            "response": response.text
+        }
 
-    return Response(
-        bytes(audio),
-        mimetype="application/octet-stream"
-    )
+    except Exception as e:
+
+        return {
+            "status": "error",
+            "error": str(e)
+        }, 500
 
 
 # =====================================================
-# MARVIN PCM
+# MARVIN TTS
 # =====================================================
 
-@app.route("/marvin-pcm")
-def marvin_pcm():
+@app.route("/marvin-tts")
+def marvin_tts():
 
     texto = request.args.get(
         "texto",
-        "Olá. Eu sou Marvin."
+        "Olá. Eu sou Marvin. Isso provavelmente não vai terminar bem."
     )
 
-    print("Texto recebido:", texto)
+    print()
+    print("================================")
+    print("MARVIN TTS")
+    print("================================")
+    print("Texto:", texto)
 
-    # -------------------------------------------------
-    # POR ENQUANTO, TESTE COM TOM
-    # -------------------------------------------------
+    try:
 
-    sample_rate = 24000
+        response = client.models.generate_content(
 
-    frequencia = 440
+            model="gemini-3.8-flash-tts",
 
-    duracao = 2
+            contents=texto,
 
-    total_amostras = (
-        sample_rate * duracao
-    )
+            config={
+                "response_modalities": ["AUDIO"],
 
-    amplitude = 10000
+                "speech_config": {
+                    "voice_config": {
+                        "prebuilt_voice_config": {
+                            "voice_name": "Kore"
+                        }
+                    }
+                }
+            }
+        )
 
-    audio = bytearray()
+        # -------------------------------------------------
+        # LOCALIZAR AUDIO
+        # -------------------------------------------------
 
-    for i in range(total_amostras):
+        audio_data = None
 
-        valor = int(
-            amplitude *
-            math.sin(
-                2 * math.pi *
-                frequencia *
-                i /
-                sample_rate
+        for candidate in response.candidates:
+
+            if not candidate.content:
+                continue
+
+            for part in candidate.content.parts:
+
+                if part.inline_data:
+
+                    audio_data = part.inline_data.data
+
+                    break
+
+            if audio_data:
+                break
+
+
+        if audio_data is None:
+
+            return {
+                "status": "error",
+                "error": "Gemini nao retornou audio."
+            }, 500
+
+
+        # -------------------------------------------------
+        # DECODIFICAR BASE64 SE NECESSARIO
+        # -------------------------------------------------
+
+        if isinstance(audio_data, str):
+
+            audio_data = base64.b64decode(
+                audio_data
             )
+
+
+        # -------------------------------------------------
+        # TENTAR INTERPRETAR COMO WAV
+        # -------------------------------------------------
+
+        try:
+
+            wav = wave.open(
+                io.BytesIO(audio_data),
+                "rb"
+            )
+
+            canais = wav.getnchannels()
+            sample_rate = wav.getframerate()
+            bits = wav.getsampwidth() * 8
+
+            pcm = wav.readframes(
+                wav.getnframes()
+            )
+
+            wav.close()
+
+            print(
+                "WAV recebido:",
+                sample_rate,
+                "Hz",
+                canais,
+                "canais",
+                bits,
+                "bits"
+            )
+
+        except Exception:
+
+            # ---------------------------------------------
+            # CASO JÁ SEJA PCM
+            # ---------------------------------------------
+
+            print(
+                "Audio recebido como PCM bruto."
+            )
+
+            sample_rate = 24000
+            canais = 1
+            bits = 16
+
+            pcm = audio_data
+
+
+        # -------------------------------------------------
+        # RETORNAR AUDIO
+        # -------------------------------------------------
+
+        print(
+            "Bytes PCM:",
+            len(pcm)
         )
 
-        audio += struct.pack(
-            "<h",
-            valor
+        return Response(
+
+            pcm,
+
+            mimetype="application/octet-stream",
+
+            headers={
+                "Content-Type":
+                    "application/octet-stream",
+
+                "X-Sample-Rate":
+                    str(sample_rate),
+
+                "X-Channels":
+                    str(canais),
+
+                "X-Bits":
+                    str(bits)
+            }
         )
 
-    return Response(
-        bytes(audio),
-        mimetype="application/octet-stream",
-        headers={
-            "X-Sample-Rate": "24000",
-            "X-Channels": "1",
-            "X-Bits": "16",
-            "X-Marvin-Text": texto
-        }
-    )
+
+    except Exception as e:
+
+        print(
+            "ERRO TTS:",
+            str(e)
+        )
+
+        return jsonify({
+
+            "status": "error",
+
+            "error": str(e)
+
+        }), 500
 
 
 # =====================================================
