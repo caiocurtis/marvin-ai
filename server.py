@@ -1,4 +1,3 @@
-```python
 from flask import Flask, request, jsonify, Response
 from google import genai
 import os
@@ -464,4 +463,3 @@ if __name__ == "__main__":
             )
         )
     )
-```
