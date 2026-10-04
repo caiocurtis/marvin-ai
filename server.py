@@ -6,6 +6,7 @@ import struct
 import base64
 import io
 import wave
+import time
 
 
 # =====================================================
@@ -22,6 +23,17 @@ app = Flask(__name__)
 client = genai.Client(
     api_key=os.environ.get("GEMINI_API_KEY")
 )
+
+
+# =====================================================
+# MODELOS DO MARVIN
+# =====================================================
+
+MODELOS_MARVIN = [
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash"
+]
 
 
 # =====================================================
@@ -59,9 +71,7 @@ def test_gemini():
     try:
 
         response = client.models.generate_content(
-
             model="gemini-3.8-flash",
-
             contents="Responda apenas: Olá, eu sou Marvin."
         )
 
@@ -154,21 +164,14 @@ def marvin_pcm():
     print("==============================")
     print("Texto recebido:", texto)
 
-    # -------------------------------------------------
-    # POR ENQUANTO: TOM DE TESTE
-    # -------------------------------------------------
-
     sample_rate = 24000
-
     frequencia = 440
-
     duracao = 2
+    amplitude = 10000
 
     total_amostras = (
         sample_rate * duracao
     )
-
-    amplitude = 10000
 
     audio = bytearray()
 
@@ -215,6 +218,161 @@ def marvin_pcm():
 
 
 # =====================================================
+# FUNÇÃO DO CÉREBRO
+# =====================================================
+
+def perguntar_gemini(texto):
+
+    prompt = f"""
+Você é Marvin, um pequeno robô assistente.
+
+Sua personalidade é:
+
+- inteligente
+- seca
+- sarcástica
+- levemente pessimista
+- ocasionalmente entediada
+- mas sempre útil
+
+Responda em português do Brasil.
+
+Seja relativamente conciso,
+especialmente quando a pergunta for simples.
+
+Não diga que você é um personagem de nenhuma obra existente.
+
+Usuário:
+{texto}
+
+Marvin:
+"""
+
+
+    ultimo_erro = None
+
+
+    # =================================================
+    # TENTAR OS MODELOS
+    # =================================================
+
+    for modelo in MODELOS_MARVIN:
+
+        print()
+        print(
+            "Tentando modelo:",
+            modelo
+        )
+
+
+        # ---------------------------------------------
+        # DUAS TENTATIVAS POR MODELO
+        # ---------------------------------------------
+
+        for tentativa in range(2):
+
+            try:
+
+                print(
+                    "Tentativa:",
+                    tentativa + 1
+                )
+
+
+                response = client.models.generate_content(
+
+                    model=modelo,
+
+                    contents=prompt
+                )
+
+
+                resposta = response.text
+
+
+                print()
+                print(
+                    "SUCESSO!"
+                )
+
+                print(
+                    "Modelo utilizado:",
+                    modelo
+                )
+
+
+                return resposta, modelo
+
+
+            except Exception as e:
+
+                ultimo_erro = str(e)
+
+
+                print()
+                print(
+                    "Erro no modelo:",
+                    modelo
+                )
+
+                print(
+                    str(e)
+                )
+
+
+                erro = str(e)
+
+
+                # -------------------------------------
+                # SÓ RETENTAR ERROS TRANSITÓRIOS
+                # -------------------------------------
+
+                erro_transitorio = (
+
+                    "503" in erro or
+                    "UNAVAILABLE" in erro or
+                    "500" in erro or
+                    "INTERNAL" in erro or
+                    "429" in erro or
+                    "RESOURCE_EXHAUSTED" in erro
+                )
+
+
+                if not erro_transitorio:
+
+                    break
+
+
+                # -------------------------------------
+                # ESPERA EXPONENCIAL
+                # -------------------------------------
+
+                if tentativa == 0:
+
+                    print(
+                        "Aguardando 2 segundos..."
+                    )
+
+                    time.sleep(2)
+
+                else:
+
+                    print(
+                        "Mudando para próximo modelo..."
+                    )
+
+
+    # =================================================
+    # TODOS FALHARAM
+    # =================================================
+
+    raise Exception(
+        "Todos os modelos do Gemini falharam. "
+        "Último erro: " + str(ultimo_erro)
+    )
+
+
+# =====================================================
 # CÉREBRO DO MARVIN
 # =====================================================
 
@@ -226,69 +384,69 @@ def marvin():
         "Olá, Marvin."
     )
 
+
     print()
     print("==============================")
     print("MARVIN")
     print("==============================")
-    print("Pergunta:", texto)
+
+    print(
+        "Pergunta recebida:",
+        texto
+    )
+
 
     try:
 
-        response = client.models.generate_content(
-
-            model="gemini-3.8-flash",
-
-            contents=f"""
-Você é Marvin, um pequeno robô assistente.
-
-Sua personalidade é:
-- inteligente
-- seca
-- sarcástica
-- levemente pessimista
-- ocasionalmente entediada
-- mas sempre útil
-
-Responda em português do Brasil.
-
-Seja relativamente conciso, especialmente quando a pergunta for simples.
-
-Não diga que você é um personagem de nenhuma obra existente.
-
-Usuário:
-{texto}
-
-Marvin:
-"""
+        resposta, modelo = perguntar_gemini(
+            texto
         )
 
-        resposta = response.text
 
-        print("Resposta:", resposta)
+        print()
+        print(
+            "Resposta:",
+            resposta
+        )
+
 
         return {
 
-            "status": "ok",
+            "status":
+                "ok",
 
-            "pergunta": texto,
+            "pergunta":
+                texto,
 
-            "resposta": resposta
+            "resposta":
+                resposta,
+
+            "modelo":
+                modelo
         }
+
 
     except Exception as e:
 
+        print()
         print(
-            "ERRO GEMINI:",
+            "TODOS OS MODELOS FALHARAM"
+        )
+
+        print(
             str(e)
         )
 
+
         return {
 
-            "status": "error",
+            "status":
+                "error",
 
-            "error": str(e)
+            "error":
+                str(e)
 
-        }, 500
+        }, 503
 
 
 # =====================================================
@@ -302,14 +460,21 @@ def marvin_tts():
 
         "texto",
 
-        "Olá. Eu sou Marvin. Isso provavelmente não vai terminar bem."
+        "Olá. Eu sou Marvin. "
+        "Isso provavelmente não vai terminar bem."
     )
+
 
     print()
     print("==============================")
     print("MARVIN TTS")
     print("==============================")
-    print("Texto:", texto)
+
+    print(
+        "Texto:",
+        texto
+    )
+
 
     try:
 
@@ -331,23 +496,27 @@ def marvin_tts():
 
                         "prebuilt_voice_config": {
 
-                            "voice_name": "Kore"
+                            "voice_name":
+                                "Kore"
                         }
                     }
                 }
             }
         )
 
-        # -------------------------------------------------
-        # PROCURAR AUDIO
-        # -------------------------------------------------
+
+        # ---------------------------------------------
+        # LOCALIZAR AUDIO
+        # ---------------------------------------------
 
         audio_data = None
+
 
         for candidate in response.candidates:
 
             if not candidate.content:
                 continue
+
 
             for part in candidate.content.parts:
 
@@ -359,6 +528,7 @@ def marvin_tts():
 
                     break
 
+
             if audio_data:
 
                 break
@@ -368,7 +538,8 @@ def marvin_tts():
 
             return {
 
-                "status": "error",
+                "status":
+                    "error",
 
                 "error":
                     "Gemini não retornou áudio."
@@ -376,9 +547,9 @@ def marvin_tts():
             }, 500
 
 
-        # -------------------------------------------------
+        # ---------------------------------------------
         # BASE64
-        # -------------------------------------------------
+        # ---------------------------------------------
 
         if isinstance(
             audio_data,
@@ -390,9 +561,9 @@ def marvin_tts():
             )
 
 
-        # -------------------------------------------------
+        # ---------------------------------------------
         # TENTAR LER WAV
-        # -------------------------------------------------
+        # ---------------------------------------------
 
         try:
 
@@ -401,20 +572,30 @@ def marvin_tts():
                 "rb"
             )
 
-            canais = wav.getnchannels()
 
-            sample_rate = wav.getframerate()
+            canais = (
+                wav.getnchannels()
+            )
+
+
+            sample_rate = (
+                wav.getframerate()
+            )
+
 
             bits = (
-                wav.getsampwidth() *
-                8
+                wav.getsampwidth()
+                * 8
             )
+
 
             pcm = wav.readframes(
                 wav.getnframes()
             )
 
+
             wav.close()
+
 
             print(
                 "WAV recebido:",
@@ -426,11 +607,13 @@ def marvin_tts():
                 "bits"
             )
 
+
         except Exception:
 
             print(
-                "Áudio recebido como PCM bruto."
+                "Audio recebido como PCM bruto."
             )
+
 
             sample_rate = 24000
 
@@ -441,14 +624,15 @@ def marvin_tts():
             pcm = audio_data
 
 
-        # -------------------------------------------------
+        # ---------------------------------------------
         # RETORNAR PCM
-        # -------------------------------------------------
+        # ---------------------------------------------
 
         print(
             "Bytes PCM:",
             len(pcm)
         )
+
 
         return Response(
 
@@ -479,6 +663,7 @@ def marvin_tts():
             "ERRO TTS:",
             str(e)
         )
+
 
         return jsonify({
 
