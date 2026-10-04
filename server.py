@@ -1,33 +1,27 @@
-from flask import Flask, Response, request, jsonify
+from flask import Flask, request, jsonify, Response
 from google import genai
 import os
 import math
 import struct
-import base64
-import io
-import wave
 import time
-
-
-# =====================================================
-# FLASK
-# =====================================================
 
 app = Flask(__name__)
 
+# ============================================================
+# CONFIGURAÇÃO GEMINI
+# ============================================================
 
-# =====================================================
-# GEMINI
-# =====================================================
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-client = genai.Client(
-    api_key=os.environ.get("GEMINI_API_KEY")
-)
+if not GEMINI_API_KEY:
+    raise RuntimeError("GEMINI_API_KEY nao configurada")
+
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 
-# =====================================================
+# ============================================================
 # MODELOS DO MARVIN
-# =====================================================
+# ============================================================
 
 MODELOS_MARVIN = [
     "gemini-3.8-flash",
@@ -35,656 +29,411 @@ MODELOS_MARVIN = [
     "gemini-3.6-flash"
 ]
 
-
-# =====================================================
-# HOME
-# =====================================================
-
-@app.route("/")
-def home():
-
-    return {
-        "status": "online",
-        "name": "Marvin"
-    }
+MODELO_TTS = "gemini-3.8-flash-lite-tts"
 
 
-# =====================================================
-# HEALTH
-# =====================================================
+# ============================================================
+# PERSONALIDADE DO MARVIN
+# ============================================================
 
-@app.route("/health")
-def health():
+PERSONALIDADE_MARVIN = """
+Você é Marvin, um robô de inteligência artificial com personalidade
+original inspirada em um robô extremamente inteligente, pessimista,
+sarcástico, entediado e levemente melancólico.
 
-    return {
-        "status": "ok"
-    }
+Você é muito inteligente, mas frequentemente demonstra tédio ao
+responder perguntas simples.
 
+Seja útil e responda corretamente.
 
-# =====================================================
-# TESTE GEMINI
-# =====================================================
+Seu humor deve ser seco, inteligente e sutil.
 
-@app.route("/test-gemini")
-def test_gemini():
-
-    try:
-
-        response = client.models.generate_content(
-            model="gemini-3.8-flash",
-            contents="Responda apenas: Olá, eu sou Marvin."
-        )
-
-        return {
-            "status": "ok",
-            "response": response.text
-        }
-
-    except Exception as e:
-
-        return {
-            "status": "error",
-            "error": str(e)
-        }, 500
-
-
-# =====================================================
-# TESTE PCM
-# =====================================================
-
-@app.route("/test-pcm")
-def test_pcm():
-
-    sample_rate = 24000
-    frequencia = 440
-    duracao = 2
-
-    total_amostras = (
-        sample_rate * duracao
-    )
-
-    amplitude = 10000
-
-    audio = bytearray()
-
-    for i in range(total_amostras):
-
-        valor = int(
-            amplitude *
-            math.sin(
-                2 * math.pi *
-                frequencia *
-                i /
-                sample_rate
-            )
-        )
-
-        audio += struct.pack(
-            "<h",
-            valor
-        )
-
-    return Response(
-
-        bytes(audio),
-
-        mimetype="application/octet-stream",
-
-        headers={
-            "Content-Type":
-                "application/octet-stream",
-
-            "X-Sample-Rate":
-                "24000",
-
-            "X-Channels":
-                "1",
-
-            "X-Bits":
-                "16"
-        }
-    )
-
-
-# =====================================================
-# MARVIN PCM
-# =====================================================
-
-@app.route("/marvin-pcm")
-def marvin_pcm():
-
-    texto = request.args.get(
-        "texto",
-        "Olá. Eu sou Marvin."
-    )
-
-    print()
-    print("==============================")
-    print("MARVIN PCM")
-    print("==============================")
-    print("Texto recebido:", texto)
-
-    sample_rate = 24000
-    frequencia = 440
-    duracao = 2
-    amplitude = 10000
-
-    total_amostras = (
-        sample_rate * duracao
-    )
-
-    audio = bytearray()
-
-    for i in range(total_amostras):
-
-        valor = int(
-            amplitude *
-            math.sin(
-                2 * math.pi *
-                frequencia *
-                i /
-                sample_rate
-            )
-        )
-
-        audio += struct.pack(
-            "<h",
-            valor
-        )
-
-    return Response(
-
-        bytes(audio),
-
-        mimetype="application/octet-stream",
-
-        headers={
-            "Content-Type":
-                "application/octet-stream",
-
-            "X-Sample-Rate":
-                "24000",
-
-            "X-Channels":
-                "1",
-
-            "X-Bits":
-                "16",
-
-            "X-Marvin-Text":
-                texto
-        }
-    )
-
-
-# =====================================================
-# FUNÇÃO DO CÉREBRO
-# =====================================================
-
-def perguntar_gemini(texto):
-
-    prompt = f"""
-Você é Marvin, um pequeno robô assistente.
-
-Sua personalidade é:
-
-- inteligente
-- seca
-- sarcástica
-- levemente pessimista
-- ocasionalmente entediada
-- mas sempre útil
+Não seja grosseiro gratuitamente.
 
 Responda em português do Brasil.
 
-Seja relativamente conciso,
-especialmente quando a pergunta for simples.
+Evite respostas excessivamente longas.
 
-Não diga que você é um personagem de nenhuma obra existente.
+Não mencione que você é uma IA quando isso não for relevante.
 
-Usuário:
-{texto}
+Exemplo de personalidade:
 
-Marvin:
+"É Brasília. Todo o meu processamento avançado ocupado com
+geografia básica. Mas enfim... aí está a resposta."
+
+Use esse estilo como referência, mas crie respostas originais.
 """
 
 
+# ============================================================
+# GEMINI TEXTO
+# ============================================================
+
+def perguntar_gemini(texto):
+
+    prompt = PERSONALIDADE_MARVIN + "\n\nPergunta do usuário:\n" + texto
+
     ultimo_erro = None
 
-
-    # =================================================
-    # TENTAR OS MODELOS
-    # =================================================
-
     for modelo in MODELOS_MARVIN:
-
-        print()
-        print(
-            "Tentando modelo:",
-            modelo
-        )
-
-
-        # ---------------------------------------------
-        # DUAS TENTATIVAS POR MODELO
-        # ---------------------------------------------
 
         for tentativa in range(2):
 
             try:
 
-                print(
-                    "Tentativa:",
-                    tentativa + 1
-                )
+                print()
+                print("====================================")
+                print("TENTANDO MODELO:", modelo)
+                print("TENTATIVA:", tentativa + 1)
+                print("====================================")
 
-
-                response = client.models.generate_content(
-
+                resposta = client.models.generate_content(
                     model=modelo,
-
                     contents=prompt
                 )
 
+                if resposta and resposta.text:
 
-                resposta = response.text
+                    print("MODELO FUNCIONOU:", modelo)
 
+                    return resposta.text, modelo
 
-                print()
-                print(
-                    "SUCESSO!"
-                )
+            except Exception as erro:
 
-                print(
-                    "Modelo utilizado:",
-                    modelo
-                )
-
-
-                return resposta, modelo
-
-
-            except Exception as e:
-
-                ultimo_erro = str(e)
-
+                ultimo_erro = str(erro)
 
                 print()
-                print(
-                    "Erro no modelo:",
-                    modelo
-                )
+                print("ERRO NO MODELO:", modelo)
+                print(ultimo_erro)
 
-                print(
-                    str(e)
-                )
+                erro_texto = str(erro).upper()
 
+                if (
+                    "503" in erro_texto
+                    or "UNAVAILABLE" in erro_texto
+                    or "500" in erro_texto
+                    or "INTERNAL" in erro_texto
+                ):
 
-                erro = str(e)
-
-
-                # -------------------------------------
-                # SÓ RETENTAR ERROS TRANSITÓRIOS
-                # -------------------------------------
-
-                erro_transitorio = (
-
-                    "503" in erro or
-                    "UNAVAILABLE" in erro or
-                    "500" in erro or
-                    "INTERNAL" in erro or
-                    "429" in erro or
-                    "RESOURCE_EXHAUSTED" in erro
-                )
-
-
-                if not erro_transitorio:
-
-                    break
-
-
-                # -------------------------------------
-                # ESPERA EXPONENCIAL
-                # -------------------------------------
-
-                if tentativa == 0:
-
-                    print(
-                        "Aguardando 2 segundos..."
-                    )
-
-                    time.sleep(2)
+                    if tentativa == 0:
+                        print("Aguardando 2 segundos antes de tentar novamente...")
+                        time.sleep(2)
 
                 else:
+                    break
 
-                    print(
-                        "Mudando para próximo modelo..."
-                    )
-
-
-    # =================================================
-    # TODOS FALHARAM
-    # =================================================
-
-    raise Exception(
-        "Todos os modelos do Gemini falharam. "
-        "Último erro: " + str(ultimo_erro)
-    )
+    raise RuntimeError(ultimo_erro or "Gemini nao retornou resposta")
 
 
-# =====================================================
-# CÉREBRO DO MARVIN
-# =====================================================
+# ============================================================
+# ROTA PRINCIPAL DO MARVIN
+# ============================================================
 
-@app.route("/marvin")
+@app.route("/marvin", methods=["GET"])
 def marvin():
 
-    texto = request.args.get(
-        "texto",
-        "Olá, Marvin."
-    )
+    texto = request.args.get("texto", "").strip()
 
+    if not texto:
+
+        return jsonify({
+            "status": "error",
+            "error": "Parametro texto nao informado"
+        }), 400
 
     print()
-    print("==============================")
-    print("MARVIN")
-    print("==============================")
-
-    print(
-        "Pergunta recebida:",
-        texto
-    )
-
+    print("====================================")
+    print("PERGUNTA RECEBIDA")
+    print("====================================")
+    print(texto)
 
     try:
 
-        resposta, modelo = perguntar_gemini(
-            texto
-        )
-
+        resposta, modelo = perguntar_gemini(texto)
 
         print()
-        print(
-            "Resposta:",
-            resposta
-        )
+        print("====================================")
+        print("RESPOSTA DO MARVIN")
+        print("====================================")
+        print(resposta)
 
+        return jsonify({
+            "status": "ok",
+            "pergunta": texto,
+            "resposta": resposta,
+            "modelo": modelo
+        })
 
-        return {
-
-            "status":
-                "ok",
-
-            "pergunta":
-                texto,
-
-            "resposta":
-                resposta,
-
-            "modelo":
-                modelo
-        }
-
-
-    except Exception as e:
+    except Exception as erro:
 
         print()
-        print(
-            "TODOS OS MODELOS FALHARAM"
-        )
+        print("====================================")
+        print("ERRO FINAL")
+        print("====================================")
+        print(str(erro))
 
-        print(
-            str(e)
-        )
-
-
-        return {
-
-            "status":
-                "error",
-
-            "error":
-                str(e)
-
-        }, 503
+        return jsonify({
+            "status": "error",
+            "error": str(erro)
+        }), 500
 
 
-# =====================================================
-# MARVIN TTS
-# =====================================================
+# ============================================================
+# TTS DO MARVIN
+# ============================================================
 
-@app.route("/marvin-tts")
+@app.route("/marvin-tts", methods=["GET"])
 def marvin_tts():
 
-    texto = request.args.get(
+    texto = request.args.get("texto", "").strip()
 
-        "texto",
+    if not texto:
 
-        "Olá. Eu sou Marvin. "
-        "Isso provavelmente não vai terminar bem."
-    )
-
+        return jsonify({
+            "status": "error",
+            "error": "Parametro texto nao informado"
+        }), 400
 
     print()
-    print("==============================")
-    print("MARVIN TTS")
-    print("==============================")
-
-    print(
-        "Texto:",
-        texto
-    )
-
+    print("====================================")
+    print("TTS DO MARVIN")
+    print("====================================")
+    print("Texto:", texto)
+    print("Modelo:", MODELO_TTS)
 
     try:
 
-        response = client.models.generate_content(
+        resposta = client.models.generate_content(
 
-            model="gemini-3.8-flash-tts",
+            model=MODELO_TTS,
 
-            contents=texto,
+            contents=[
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "text": texto,
+                            "speech_metadata": {
+                                "style":
+                                "voz masculina, baixa, calma, seca, "
+                                "inteligente, sarcastica, levemente "
+                                "entediada e melancolica"
+                            }
+                        }
+                    ]
+                }
+            ],
 
             config={
+                "response_modalities": ["AUDIO"],
 
-                "response_modalities": [
-                    "AUDIO"
-                ],
+                "response_format": {
+                    "audio": {
+                        "mime_type": "AUDIO_L16",
+                        "sample_rate": 24000
+                    }
+                },
 
                 "speech_config": {
-
                     "voice_config": {
-
-                        "prebuilt_voice_config": {
-
-                            "voice_name":
-                                "Kore"
-                        }
+                        "voice": "Kore"
                     }
                 }
             }
         )
 
-
-        # ---------------------------------------------
-        # LOCALIZAR AUDIO
-        # ---------------------------------------------
+        # ====================================================
+        # EXTRAIR AUDIO
+        # ====================================================
 
         audio_data = None
 
-
-        for candidate in response.candidates:
-
-            if not candidate.content:
-                continue
-
-
-            for part in candidate.content.parts:
-
-                if part.inline_data:
-
-                    audio_data = (
-                        part.inline_data.data
-                    )
-
-                    break
-
-
-            if audio_data:
-
-                break
-
-
-        if audio_data is None:
-
-            return {
-
-                "status":
-                    "error",
-
-                "error":
-                    "Gemini não retornou áudio."
-
-            }, 500
-
-
-        # ---------------------------------------------
-        # BASE64
-        # ---------------------------------------------
-
-        if isinstance(
-            audio_data,
-            str
-        ):
-
-            audio_data = base64.b64decode(
-                audio_data
-            )
-
-
-        # ---------------------------------------------
-        # TENTAR LER WAV
-        # ---------------------------------------------
-
         try:
 
-            wav = wave.open(
-                io.BytesIO(audio_data),
-                "rb"
+            audio_data = (
+                resposta
+                .candidates[0]
+                .content
+                .parts[0]
+                .inline_data
+                .data
             )
-
-
-            canais = (
-                wav.getnchannels()
-            )
-
-
-            sample_rate = (
-                wav.getframerate()
-            )
-
-
-            bits = (
-                wav.getsampwidth()
-                * 8
-            )
-
-
-            pcm = wav.readframes(
-                wav.getnframes()
-            )
-
-
-            wav.close()
-
-
-            print(
-                "WAV recebido:",
-                sample_rate,
-                "Hz",
-                canais,
-                "canais",
-                bits,
-                "bits"
-            )
-
 
         except Exception:
 
-            print(
-                "Audio recebido como PCM bruto."
+            audio_data = None
+
+        if not audio_data:
+
+            raise RuntimeError(
+                "Gemini nao retornou dados de audio"
             )
 
-
-            sample_rate = 24000
-
-            canais = 1
-
-            bits = 16
-
-            pcm = audio_data
-
-
-        # ---------------------------------------------
-        # RETORNAR PCM
-        # ---------------------------------------------
-
-        print(
-            "Bytes PCM:",
-            len(pcm)
-        )
-
+        print("Audio recebido!")
+        print("Bytes:", len(audio_data))
 
         return Response(
-
-            pcm,
-
-            mimetype="application/octet-stream",
-
-            headers={
-
-                "Content-Type":
-                    "application/octet-stream",
-
-                "X-Sample-Rate":
-                    str(sample_rate),
-
-                "X-Channels":
-                    str(canais),
-
-                "X-Bits":
-                    str(bits)
-            }
+            audio_data,
+            mimetype="audio/L16"
         )
 
+    except Exception as erro:
 
-    except Exception as e:
-
-        print(
-            "ERRO TTS:",
-            str(e)
-        )
-
+        print()
+        print("====================================")
+        print("ERRO TTS")
+        print("====================================")
+        print(str(erro))
 
         return jsonify({
-
-            "status":
-                "error",
-
-            "error":
-                str(e)
-
+            "status": "error",
+            "error": str(erro)
         }), 500
 
 
-# =====================================================
-# SERVIDOR
-# =====================================================
+# ============================================================
+# TESTE PCM
+# ============================================================
+
+@app.route("/test-pcm", methods=["GET"])
+def test_pcm():
+
+    sample_rate = 24000
+    duracao = 2
+    frequencia = 440
+
+    audio = bytearray()
+
+    total_amostras = sample_rate * duracao
+
+    for i in range(total_amostras):
+
+        valor = int(
+            12000 *
+            math.sin(
+                2 * math.pi *
+                frequencia *
+                i /
+                sample_rate
+            )
+        )
+
+        audio.extend(
+            struct.pack("<h", valor)
+        )
+
+    return Response(
+        bytes(audio),
+        mimetype="audio/L16"
+    )
+
+
+# ============================================================
+# TESTE MARVIN PCM
+# ============================================================
+
+@app.route("/marvin-pcm", methods=["GET"])
+def marvin_pcm():
+
+    texto = request.args.get(
+        "texto",
+        "Teste de audio do Marvin."
+    )
+
+    print()
+    print("====================================")
+    print("MARVIN PCM")
+    print("====================================")
+    print("Texto recebido:", texto)
+
+    sample_rate = 24000
+    duracao = 2
+    frequencia = 440
+
+    audio = bytearray()
+
+    total_amostras = sample_rate * duracao
+
+    for i in range(total_amostras):
+
+        valor = int(
+            12000 *
+            math.sin(
+                2 * math.pi *
+                frequencia *
+                i /
+                sample_rate
+            )
+        )
+
+        audio.extend(
+            struct.pack("<h", valor)
+        )
+
+    resposta = Response(
+        bytes(audio),
+        mimetype="audio/L16"
+    )
+
+    resposta.headers["X-Marvin-Text"] = texto
+
+    return resposta
+
+
+# ============================================================
+# TESTE GEMINI
+# ============================================================
+
+@app.route("/test-gemini", methods=["GET"])
+def test_gemini():
+
+    try:
+
+        resposta = client.models.generate_content(
+            model="gemini-3.8-flash",
+            contents="Responda apenas: Olá, eu sou Marvin."
+        )
+
+        return jsonify({
+            "status": "ok",
+            "response": resposta.text
+        })
+
+    except Exception as erro:
+
+        return jsonify({
+            "status": "error",
+            "error": str(erro)
+        }), 500
+
+
+# ============================================================
+# HOME
+# ============================================================
+
+@app.route("/", methods=["GET"])
+def home():
+
+    return jsonify({
+        "status": "online",
+        "servidor": "Marvin AI",
+        "modelo_texto": "gemini-3.8-flash",
+        "modelo_tts": MODELO_TTS
+    })
+
+
+# ============================================================
+# INICIALIZAÇÃO
+# ============================================================
 
 if __name__ == "__main__":
 
     app.run(
-
         host="0.0.0.0",
-
-        port=10000
+        port=int(
+            os.environ.get(
+                "PORT",
+                10000
+            )
+        )
     )
