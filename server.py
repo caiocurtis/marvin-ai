@@ -70,18 +70,31 @@ Use esse estilo como referência, mas crie respostas originais.
 # GEMINI TEXTO
 # ============================================================
 
+def classificar_erro_gemini(erro):
+    """Identifica falhas temporárias do serviço Gemini."""
+    mensagem = str(erro).upper()
+
+    if any(chave in mensagem for chave in (
+        "503", "UNAVAILABLE", "SERVICE UNAVAILABLE",
+        "500", "INTERNAL", "502", "BAD GATEWAY",
+        "504", "GATEWAY TIMEOUT", "429", "RESOURCE_EXHAUSTED",
+        "TOO MANY REQUESTS", "RATE LIMIT", "TIMEOUT",
+        "TIMED OUT", "CONNECTION RESET", "CONNECTION ERROR",
+        "TEMPORARILY"
+    )):
+        return True
+    return False
+
+
 def perguntar_gemini(texto):
-
-    prompt = PERSONALIDADE_MARVIN + "\n\nPergunta do usuário:\n" + texto
-
+    prompt = PERSONALIDADE_MARVIN + "\\n\\nPergunta do usuário:\\n" + texto
     ultimo_erro = None
+    houve_indisponibilidade = False
 
+    # Tenta cada modelo duas vezes, com pequena espera entre tentativas.
     for modelo in MODELOS_MARVIN:
-
         for tentativa in range(2):
-
             try:
-
                 print()
                 print("====================================")
                 print("TENTANDO MODELO:", modelo)
@@ -93,42 +106,46 @@ def perguntar_gemini(texto):
                     contents=prompt
                 )
 
-                if resposta and resposta.text:
-
+                if resposta and getattr(resposta, "text", None):
                     print("MODELO FUNCIONOU:", modelo)
-
                     return resposta.text, modelo
 
-            except Exception as erro:
+                ultimo_erro = "O Gemini retornou uma resposta vazia."
+                print(ultimo_erro)
+                break
 
+            except Exception as erro:
                 ultimo_erro = str(erro)
+                temporario = classificar_erro_gemini(erro)
 
                 print()
                 print("ERRO NO MODELO:", modelo)
                 print(ultimo_erro)
 
-                erro_texto = str(erro).upper()
-
-                if (
-                    "503" in erro_texto
-                    or "UNAVAILABLE" in erro_texto
-                    or "500" in erro_texto
-                    or "INTERNAL" in erro_texto
-                ):
-
+                if temporario:
+                    houve_indisponibilidade = True
                     if tentativa == 0:
-                        print(
-                            "Aguardando 2 segundos antes "
-                            "de tentar novamente..."
-                        )
-                        time.sleep(2)
-
+                        espera = 2
+                        print(f"Erro temporário. Nova tentativa em {espera} segundos...")
+                        time.sleep(espera)
+                    else:
+                        print("Modelo indisponível após duas tentativas.")
                 else:
+                    # Erros de configuração/modelo inválido não são repetidos.
+                    print("Erro não transitório; tentando o próximo modelo.")
                     break
 
+    if houve_indisponibilidade:
+        raise RuntimeError(
+            "Os modelos do Gemini estão temporariamente indisponíveis ou "
+            "atingiram um limite de uso. Tente novamente em alguns instantes. "
+            f"Detalhe técnico: {ultimo_erro}"
+        )
+
     raise RuntimeError(
-        ultimo_erro or
-        "Gemini nao retornou resposta"
+        "Nenhum modelo configurado conseguiu responder. Verifique os nomes "
+        "dos modelos e as permissões da chave GEMINI_API_KEY. "
+        f"Detalhe técnico: {ultimo_erro or 'sem detalhes'}"
     )
 
 
@@ -182,10 +199,19 @@ def marvin():
         print("====================================")
         print(str(erro))
 
+        mensagem_erro = str(erro)
+        erro_upper = mensagem_erro.upper()
+        indisponivel = (
+            "TEMPORARIAMENTE INDISPONÍVEIS" in erro_upper
+            or "TEMPORARIAMENTE INDISPONIVEIS" in erro_upper
+            or "LIMITE DE USO" in erro_upper
+        )
+
         return jsonify({
             "status": "error",
-            "error": str(erro)
-        }), 500
+            "error": mensagem_erro,
+            "retryable": indisponivel
+        }), (503 if indisponivel else 502)
 
 
 # ============================================================
@@ -413,7 +439,7 @@ def test_gemini():
     try:
 
         resposta = client.models.generate_content(
-            model="gemini-3.8-flash",
+            model=MODELOS_MARVIN[0],
             contents=(
                 "Responda apenas: "
                 "Olá, eu sou Marvin."
@@ -443,7 +469,7 @@ def home():
     return jsonify({
         "status": "online",
         "servidor": "Marvin AI",
-        "modelo_texto": "gemini-3.8-flash",
+        "modelo_texto": MODELOS_MARVIN[0],
         "modelo_tts": MODELO_TTS
     })
 
